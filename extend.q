@@ -12,23 +12,33 @@
 .py.ut.isTabl:{ .Q.qt x };
 .py.ut.eachKV:{ key [x]y'x};
 .py.ut.isGLst:{ 0h = type x };
-.py.ut.logger:{-1 (string .z.z)," ", x};
+.py.ut.logger:{ -1 (string .z.z)," [Py] ", x};
+.py.ut.exists:{ @[{not () ~ key x}; x; 0b] };
 .py.ut.isAtom:{ (0h > type x) and (-20h < type x) };
 .py.ut.isList:{ (0h <= type x) and (20h > type x) };
 .py.ut.enlist:{ $[not .py.ut.isList x;enlist x; x] };
 .py.ut.isDict:{ $[99h = type x;not .py.ut.isTabl x; 0b] };
+.py.ut.isName:{ if[not .py.ut.exists x; :0b]; v:value x; (.py.ut.isDict v) and (::) ~ first v };
 .py.ut.strSym:{ if[any {(type x) in ((5h$til 20)_10),98 99h}@\:x; :.z.s'[x]]; $[10h = abs type x; `$x; x] };
 .py.ut.isNull:{ $[.py.ut.isAtom[x] or .py.ut.isList[x] or x ~ (::); $[.py.ut.isGLst[x]; all .py.ut.isNull each x; all null x]; .py.ut.isTabl[x] or .py.ut.isDict[x];$[count x;0b;1b];0b ] };
-.py.ut.fapply:{(('[;])over reverse y)x};
-.py.ut.ns: enlist[`]!enlist[::];
 
-.py.meta:.py.ut.ns;
+.py.mods: ()!();
 
-.py.modules: ()!();
+.py.none: .p.eval"None"; 
 
-.py.moduleInfo: .p.get[`module_info;<];
+.py._init_: `$"__init__";
 
-.py.classInfo: .p.get[`class_info;<];
+.py.ref: (!/)((`;(::)),:');
+
+.py.info: .p.get[`get_info;<];
+
+.py.isNone:{x~.py.none};
+
+.py.qcall:{.p.qcallable[x hsym y]}';
+
+.py.metaFunc:{[m;c] .py.ref[m; `classes; c; `attributes; `functions]};
+
+.py.metaParam:{[m;c;f] .py.ref[m; `classes; c; `attributes; `functions; f; `parameters]};
 
 // Import a python module
 //
@@ -36,14 +46,14 @@
 // module [symbol] - module name
 // as     [symbol] - alias to avoid clashes
 .py.import:{[module] 
-  if[module in key .py.modules;
+  if[module in key .py.mods;
     .py.ut.logger"Module already imported"; :(::)];
-  if[@[{.py.modules[x]:.p.import x; 1b}; module; .py.importError[module]];
-      .py.ut.logger"Imported python module '",string[module],"'"];
+  if[@[{.py.mods[x]:.p.import x; 1b}; module; .py.err.import[module]];
+      .py.ut.logger"Imported module '",(module$:),"'"];
   };
 
-.py.importError:{[module; error]
-  -1"Python module '",string[module],"' failed with: ", "(",error,")";
+.py.err.import:{[module; error]
+  .py.ut.logger"ERROR! Import module '",(module$:),"' failed with: ", "(",error,")";
   0b};
 
 ///
@@ -56,12 +66,13 @@
 // parameters:
 // module [symbol] - module to reflect (must be imported)
 .py.reflect:{[module]
-  pyModule: .py.modules[module];
-  modInfo: .py.moduleInfo[pyModule];
-  clsInfo: modInfo[`classes];
-  project: .py.rt.project[pyModule; clsInfo];
-  (` sv `,module ) set project;
-  .py.meta[module]:modInfo;
+  iModule: .py.mods[module];
+  modInfo: .py.info[iModule];
+  qProject: .py.rt.project[iModule; modInfo`classes];
+
+  (` sv `,iModule ) set qProject;
+  .py.ref[module]:modInfo;
+
   1b};
 
 ///
@@ -71,48 +82,38 @@
 // parameters:
 // module [symbol]    - module to map from (must be imported)
 // module [list(sym)] - list of functions to map
-.py.map:{[module; functions; as]
-  pyModule:.py.modules[module];
-  qRef:$[.py.ut.isNull as;module;as];
+.py.map:{[module; functions; context]
+  mapped: .[{iModule: $[x in key .py.mods;
+                        .py.mods[x];
+                          '"Python module '",(x$:),"' must be imported first"];
 
-  if[not (.py.ut.isDict .py[qRef]) and (first .py[qRef]~(::));
-    .py[qRef]:.py.ut.ns];
+              qMapping: .py.qcall[iModule] y;
 
-  mapping:functions!pyModule[;<]@'hsym functions;
-  .py[qRef],:mapping;
+                rContext: $[.py.ut.isNull z; x; z];
+    
+                if[not .py.ut.isName rContext;
+                  rContext set (!/)((`;(::)),:')];
+    
+                  @[rContext; y; :; qMapping]; 1b};
+
+        (module; functions; context);
+
+      .py.err.map[module;functions]];
+
+  if[mapped;
+    .py.ut.logger"Mapped '",(module$:),"' functions (",(", " sv (functions$:)),") in `",(context$:)];
   };
+    
+.py.err.map:{[module; functions; error]
+  .py.ut.logger"ERROR! Map '",(module$:),"' functions (",(", " sv (functions$:)),") failed with: ", "(",error,")";
+  0b};
+
 
 ///
-// Creates a pseudo generator callable in q
-//
-// parameters:
-// func     [symbol]  - type of generator, accepts: list or next
-//  list - returns the entire iterator as one object
-//  next - returns the next object in the iterator
-//  (type dependent on iterator, next is callable until iterator exhausted)
-// iterator [foreign] - embedPy iterator
-// nul      [null]    - null param to prevent function from executing
-.py.generate:{[func;generator;nul]
-  res:.py.builtins[func;generator];
-  res};
-
-///
-// Create some useful embedPy tools
-.py.ini:`$"__init__";
-
-.py.none:.p.eval"None"; 
-
-.py.isNone:{x~.py.none};
-
+// Port some useful python builtins
 .py.import[`builtins];
 
-.py.map[`builtins;`list`next`vars`str;`];
-
-.py.qcall:{.p.qcallable[x hsym y]}';
-
-.py.feta:{[m;c] .py.meta[m; `classes; c; `attributes; `functions]};
-
-.py.peta:{[m;c;f] .py.meta[m; `classes; c; `attributes; `functions; f; `parameters]};
+.py.map[`builtins;`list`next`vars`str;`.py];
 
 ///////////////////////////////////////
 // PRIVATE CONTEXT                   //
@@ -131,7 +132,7 @@
   prop: atr`properties;
   func: atr`functions;
 
-  init: func[.py.ini];
+  init: func[.py._init_];
   params: init[`parameters];
   required: params[::;`required];
 
@@ -176,20 +177,20 @@
               pyarglist args];
   args};
 
-.py.rt.data.cxt:{[pin; info]
+.py.rt.data.cxt:{[ins; info]
   dkey: key info;
-  dval: pin@'hsym dkey;
+  dval: ins@'hsym dkey;
   cxt: dkey!dval;
   cxt};
 
-.py.rt.prop.cxt:{[pin; info]
+.py.rt.prop.cxt:{[ins; info]
   cxt: .py.ut.eachKV[info; 
-    {[pin; name; prop]
+    {[ins; name; prop]
       hpy: hsym name;
-        gsm: (enlist `get)!(enlist pin[hpy;]);
-          if[prop`setter; gsm[`set]:pin[:hpy;]];
+        gsm: (enlist `get)!(enlist ins[hpy;]);
+          if[prop`setter; gsm[`set]:ins[:hpy;]];
             prj:.py.rt.prop.prj[gsm];
-              prj} pin];
+              prj} ins];
   cxt};
 
 .py.rt.prop.prj:{[qco; arg]
@@ -202,11 +203,11 @@
 
   res}
 
-.py.rt.func.cxt:{[pin; info]
+.py.rt.func.cxt:{[ins; info]
   fns: key info;
-  cxt: fns!{[pin;fn]
-        prj:.py.qcall[pin;] fn;
-          prj}[pin] each fns;
+  cxt: fns!{[ins;fn]
+        prj:.py.qcall[ins;] fn;
+          prj}[ins] each fns;
   cxt};
 
 .py.rt.func.prj:{[qco; arg]
@@ -214,32 +215,14 @@
   res: qco . arg;
   res};
 
-.py.rt.vars.cxt:{[pin; info]
+.py.rt.vars.cxt:{[ins; info]
   vkey: key info;
   vpns: hsym vkey;
-  vmap: {[pin; vpn] 
-          gtf: pin[vpn;];
-            stf: pin[:;vpn;];
+  vmap: {[ins; vpn] 
+          gtf: ins[vpn;];
+            stf: ins[:;vpn;];
               gsm: `get`set!(gtf;stf);
                 prj:.py.rt.prop.prj[gsm];
-                  prj}[pin;] each vpns;
+                  prj}[ins;] each vpns;
   cxt: (!/)($[1>=count vkey; .py.ut.enlist each;](vkey;vmap));
   cxt};
-
-.pyp.idx: 0;
-
-.pyp.ref:([]module:`symbol$();class:`symbol$();ins:`symbol$();cxt:`symbol$());
-
-.pyp.point:{[r;v]
-  i: string "i"$.pyp.idx;
-  n: `$".pyp.",string[r],i;
-  n set v;
-  n};
-
-.pyp.makeRef:{[pin;pix]
-  module: `$ first "." vs pin[`:__module__;`];
-  class: `$ pin[`:__class__.__name__;`];
-  .pyp.ref,:(module; class; pin; pix);
-  .pyp.idx+:1;
-
-  last .pyp.ref};

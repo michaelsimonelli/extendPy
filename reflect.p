@@ -11,71 +11,12 @@ from collections import namedtuple, OrderedDict
 # Provides metadata and type information for imported python modules
 
 
-# Python q reflection functions.
-#
-# Utility module for py.q embedPy framework.
-# Provides metadata and type information for imported python modules
-
-def module_info(module):
-    # Returns member info for an imported python module.
-    
-    # Multilevel nested dictionary:
-    #   - module
-    #   -- classes
-    #   --- attributes
-    #   ----- properties
-    
-    mem = Member(module)
-    classes = {}
-    for cls in mem.get_members(isclass):
-        attributes = OrderedDict()
-        attributes['data'] = {x.name: x.cxt() for x in cls.get_data()}
-        attributes['properties'] = {x.name: x.cxt() for x in cls.get_properties()}
-        attributes['functions'] = {x.name: x.cxt() for x in cls.get_functions()}
-        attr_cxt = dict(attributes=attributes, doc=cls.doc)
-        classes.update({cls.name: attr_cxt})
-    
-    mod_info = dict(classes=classes)
-    return mod_info
-
-
-def class_info(obj):
+def get_info(obj):
+    if ismodule(obj):
+        return _module_info(obj)
     if isclass(obj):
-        obj = Member(obj)
-    if not isclass(obj.typ):
-        return
-    attributes = OrderedDict()
-    attributes['data'] = {x.name: x.cxt() for x in obj.get_data()}
-    attributes['properties'] = {x.name: x.cxt() for x in obj.get_properties()}
-    attributes['functions'] = {x.name: x.cxt() for x in obj.get_functions()}
-    cls_attr = dict(attributes=attributes, doc=obj.doc)
-    return cls_attr
-
-
-def member_info(obj):
-    mem = Member(obj)
-    return mem.qmap()
-
-
-def get_attrs(ins):
-    inst_vars = {}
-    for key, val in vars(ins):
-        if key.startswith('_'):
-            continue
-        ptyp = _obj_name(type(val))
-        inst_cxt = dict(pval=val, ptyp=ptyp)
-        inst_vars.update({key: inst_cxt})
-    return inst_vars
-
-
-def get_classes(obj):
-    return [m for m in getmembers(obj, isclass) if not m[0].startswith('_')]
-
-
-def get_functions(obj):
-    func = [Member(m[1], m[0]) for m in getmembers(obj, isroutine) if not m[0].startswith('_')]
-    func = [dict(name=f.name, doc=f.doc, obj=f.obj, ) for f in func]
-    return func
+        return _class_info(obj)
+    return {}
 
 
 #############################
@@ -92,7 +33,9 @@ class AttrType(IntEnum):
     PROPERTY = 2,
     INSTANCE_METHOD = 3,
     CLASS_METHOD = 4,
-    STATIC_METHOD = 5
+    STATIC_METHOD = 5,
+    MODULE_METHOD = 6,
+    MODULE_DATA = 7
 
 
 class Member:
@@ -120,7 +63,7 @@ class Member:
         qd.update(pd)
         return qd
     
-    def get_members(self, predicate):
+    def get_members(self, predicate=None):
         return [Member(m[1], m[0]) for m in getmembers(self.obj, predicate)]
     
     def get_data(self):
@@ -128,7 +71,7 @@ class Member:
                      if _is_pub(a.name) and a.kind is 'data']
         return data_info
     
-    def get_functions(self):
+    def get_methods(self):
         method_info = [FuncInfo(a) for a in classify_class_attrs(self.obj)
                        if _is_pub(a.name) and 'method' in a.kind]
         return method_info
@@ -145,7 +88,10 @@ class AttrInfo(Member):
         'class method':  AttrType.CLASS_METHOD,
         'property':      AttrType.PROPERTY,
         'method':        AttrType.INSTANCE_METHOD,
-        'data':          AttrType.CLASS_VAR
+        'data':          AttrType.CLASS_VAR,
+        'mod func':      AttrType.MODULE_METHOD,
+        'mod data':      AttrType.MODULE_DATA
+        
     }
     
     def __init__(self, attr: Attribute):
@@ -258,6 +204,96 @@ class ParamInfo(Member):
         return {self.name: cxt}
 
 
+def _module_info(module):
+    # Returns member info for an imported python module.
+    
+    # Multilevel nested dictionary:
+    #   - module
+    #   -- classes
+    #   --- attributes
+    #   ----- properties
+    
+    mem = Member(module)
+    classes = {}
+    for cls in mem.get_members(isclass):
+        cls_info = _class_info(cls)
+        classes.update({cls.name: cls_info})
+    
+    base = [Member(m[1], m[0]) for m in getmembers(module) if _is_pub(m[0]) and not isclass(m[1])]
+    
+    if base:
+        data = {}
+        func = {}
+        attr = OrderedDict()
+        for b in base:
+            if isroutine(b.obj):
+                at = (Attribute(b.name, 'mod func', module, b.obj))
+                fi = FuncInfo(at)
+                func[b.name] = fi.cxt()
+            else:
+                at = (Attribute(b.name, 'mod data', module, b.obj))
+                di = DataInfo(at)
+                data[b.name] = di.cxt()
+        
+        n = 'base'
+        if n in classes.keys():
+            classes[n]['attributes']['data'].update(data)
+            classes[n]['attributes']['functions'].update(func)
+        else:
+            attr['data'] = data
+            attr['functions'] = func
+            base_attr = dict(attributes=attr)
+            classes.update({n: base_attr})
+    
+    mod_info = dict(classes=classes)
+    return mod_info
+
+
+def _class_info(obj):
+    if isclass(obj):
+        obj = Member(obj)
+    if not isclass(obj.typ):
+        return
+    attributes = OrderedDict()
+    attributes['data'] = {x.name: x.cxt() for x in obj.get_data()}
+    attributes['properties'] = {x.name: x.cxt() for x in obj.get_properties()}
+    attributes['functions'] = {x.name: x.cxt() for x in obj.get_methods()}
+    cls_attr = dict(attributes=attributes, doc=obj.doc)
+    return cls_attr
+
+
+def _base_module_attrs(module):
+    """Classify public module attributes,
+    return as (name, category, value) tuples sorted by name."""
+    
+    if not ismodule(module):
+        raise TypeError("module must be of <class 'module'>")
+    
+    base = [Member(m[1], m[0]) for m in getmembers(module) if _is_pub(m[0]) and not isclass(m[1])]
+    
+    if base:
+        data = {}
+        func = {}
+        attr = OrderedDict()
+        
+        for b in base:
+            if isroutine(b.obj):
+                at = (Attribute(b.name, 'mod func', module, b.obj))
+                fi = FuncInfo(at)
+                func[b.name] = fi.cxt()
+            else:
+                at = (Attribute(b.name, 'mod data', module, b.obj))
+                di = DataInfo(at)
+                data[b.name] = di.cxt()
+        
+        if data:
+            attr['data'] = data
+        if func:
+            attr['functions'] = func
+    
+    return attr
+
+
 def _obj_doc(obj):
     _doc = getdoc(obj)
     return _doc.splitlines() if isinstance(_doc, str) else ''
@@ -359,4 +395,3 @@ def _doc_meta(obj):
             meta[mk] = data
     
     return meta
-
