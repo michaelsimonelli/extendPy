@@ -1,6 +1,6 @@
 package:
     name: extendpy
-    version: 0.1.0
+    version: 0.1.1
 
 source:
   path: ..
@@ -8,7 +8,14 @@ source:
 requirements:
   build:
     - python
+    - embedpy
+    - pip
+
+  host:
+    - python
+    - embedpy
     - pip
   run:
     - python
-    - pip 
+    - embedpy
+    - pip
