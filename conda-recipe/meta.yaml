@@ -6,16 +6,6 @@ source:
   path: ..
 
 requirements:
-  build:
-    - python
-    - embedpy
-    - pip
-
-  host:
-    - python
-    - embedpy
-    - pip
   run:
-    - python
     - embedpy
-    - pip
+    - pyment
