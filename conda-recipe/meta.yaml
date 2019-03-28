@@ -6,6 +6,9 @@ source:
   path: ..
 
 requirements:
+  build:
+    - python
+    - pip
   run:
     - python
     - embedpy
