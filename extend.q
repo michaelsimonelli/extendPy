@@ -19,14 +19,17 @@
 .py.ut.isDict:{ $[99h = type x;not .py.ut.isTabl x; 0b] };
 .py.ut.strSym:{ if[any {(type x) in ((5h$til 20)_10),98 99h}@\:x; :.z.s'[x]]; $[10h = abs type x; `$x; x] };
 .py.ut.isNull:{ $[.py.ut.isAtom[x] or .py.ut.isList[x] or x ~ (::); $[.py.ut.isGLst[x]; all .py.ut.isNull each x; all null x]; .py.ut.isTabl[x] or .py.ut.isDict[x];$[count x;0b;1b];0b ] };
+.py.ut.fapply:{(('[;])over reverse y)x};
+.py.ut.ns: enlist[`]!enlist[::];
 
-.py.meta.:(::);
+.py.meta:.py.ut.ns;
 
-.py.modules:()!();
+.py.modules: ()!();
 
-.py.moduleInfo:.p.get[`module_info;<];
+.py.moduleInfo: .p.get[`module_info;<];
 
-///
+.py.classInfo: .p.get[`class_info;<];
+
 // Import a python module
 //
 // parameters:
@@ -56,7 +59,7 @@
   pyModule: .py.modules[module];
   modInfo: .py.moduleInfo[pyModule];
   clsInfo: modInfo[`classes];
-  project: .py.priv.project[pyModule; clsInfo];
+  project: .py.rt.project[pyModule; clsInfo];
   (` sv `,module ) set project;
   .py.meta[module]:modInfo;
   1b};
@@ -73,7 +76,7 @@
   qRef:$[.py.ut.isNull as;module;as];
 
   if[not (.py.ut.isDict .py[qRef]) and (first .py[qRef]~(::));
-    .py[qRef]:enlist[`]!enlist[::]];
+    .py[qRef]:.py.ut.ns];
 
   mapping:functions!pyModule[;<]@'hsym functions;
   .py[qRef],:mapping;
@@ -105,21 +108,25 @@
 
 .py.map[`builtins;`list`next`vars`str;`];
 
-.py.peta:{[m;c;f] .py.meta[m; `classes; c; `attributes; `functions; f;`parameters]};
+.py.qcall:{.p.qcallable[x hsym y]}';
+
+.py.feta:{[m;c] .py.meta[m; `classes; c; `attributes; `functions]};
+
+.py.peta:{[m;c;f] .py.meta[m; `classes; c; `attributes; `functions; f; `parameters]};
 
 ///////////////////////////////////////
 // PRIVATE CONTEXT                   //
 ///////////////////////////////////////
 
-.py.priv.project:{[imp; cls]
+.py.rt.project:{[imp; cls]
   p: .py.ut.eachKV[cls;{
       obj: x hsym y;
       atr: z`attributes;
-      cxt: .py.priv.context[obj; atr];
+      cxt: .py.rt.context[obj; atr];
       cxt}[imp]];
   p};
 
-.py.priv.context:{[obj; atr; args]
+.py.rt.context:{[obj; atr; arg]
   data: atr`data;
   prop: atr`properties;
   func: atr`functions;
@@ -128,67 +135,32 @@
   params: init[`parameters];
   required: params[::;`required];
 
-  if[(args~(::)) and (any required);
+  if[(arg~(::)) and (any required);
     '"Missing required parameters: ",", " sv string where required];
 
-  args: .py.priv.args[args];
-  apply: $[1<count args;.;@];
-  inst: apply[obj;args];
+  arg: .py.rt.args[arg];
+  ins: $[1<count arg;.;@][obj;arg];
 
   func _: .py.ini;
-  vars: .py.builtins.vars[inst];
-  docs: enlist[`]!enlist[::];
+  vars: .py.builtins.vars[ins];
+  docs: .py.ut.ns;
 
   if[count data; docs[`data]: data];
   if[count prop; docs[`prop]: prop];
   if[count func; docs[`func]: func];
   if[count vars; docs[`vars]: vars];
 
-  mD: .py.priv.mapData[inst; data];
-  mP: .py.priv.mapProp[inst; prop];
-  mF: .py.priv.mapFunc[inst; func];
-  mV: .py.priv.mapVars[inst; vars];
-  cx: enlist[`]!enlist[::];
-  cx: mD,mP,mF,mV;
-  cx[`docs_]:docs;
-  cx};
+  cxD: .py.rt.data.cxt[ins; data];
+  cxP: .py.rt.prop.cxt[ins; prop];
+  cxF: .py.rt.func.cxt[ins; func];
+  cxV: .py.rt.vars.cxt[ins; vars];
+  cxt: .py.ut.ns,cxD,cxP,cxF,cxV;
+  
+  cxt[`docs_]: docs;
 
-// .py.priv.wrapper:{[obj; atr; args]
-//   data: atr`data;
-//   prop: atr`properties;
-//   func: atr`functions;
-//
-//   init: func[.py.ini];
-//   params: init[`parameters];
-//   required: params[::;`required];
-//
-//   if[(args~(::)) and (any required);
-//     '"Missing required parameters: ",", " sv string where required];
-//
-//   args: .py.priv.args[args];
-//   apply: $[1<count args;.;@];
-//   inst: apply[obj;args];
-//
-//   func _: .py.ini;
-//   vars: .py.builtins.vars[inst];
-//   docs: enlist[`]!enlist[::];
-//
-//   if[count data; docs[`data]: data];
-//   if[count prop; docs[`prop]: prop];
-//   if[count func; docs[`func]: func];
-//   if[count vars; docs[`vars]: vars];
-//
-//   mD: .py.priv.mapData[inst; data];
-//   mP: .py.priv.mapProp[inst; prop];
-//   mF: .py.priv.mapFunc[inst; func];
-//   mV: .py.priv.mapVars[inst; vars];
-//   cx: enlist[`]!enlist[::];
-//   cx: mD,mP,mF,mV;
-//   cx[`docs_]:docs;
-//   cx};
+  cxt};
 
-
-.py.priv.args:{[args]
+.py.rt.args:{[args]
   if[args~(::);:args];
   
   args: .py.ut.strSym[args];
@@ -204,36 +176,70 @@
               pyarglist args];
   args};
 
-.py.priv.mapData:{[obj; d]
-  k: key d;
-  v: obj@'hsym k;
-  m: k!v;
-  m};
+.py.rt.data.cxt:{[pin; info]
+  dkey: key info;
+  dval: pin@'hsym dkey;
+  cxt: dkey!dval;
+  cxt};
 
-.py.priv.mapProp:{[ins; d]
-  m: .py.ut.eachKV[d;{
-      h: hsym y;
-      d: (enlist `get)!(enlist x[h;]);
-      if[z`setter; d[`set]:x[:;h;]];
-      .py.priv.acor[d]}[ins]];
-  m};
+.py.rt.prop.cxt:{[pin; info]
+  cxt: .py.ut.eachKV[info; 
+    {[pin; name; prop]
+      hpy: hsym name;
+        gsm: (enlist `get)!(enlist pin[hpy;]);
+          if[prop`setter; gsm[`set]:pin[:hpy;]];
+            prj:.py.rt.prop.prj[gsm];
+              prj} pin];
+  cxt};
 
-.py.priv.mapFunc:{[ins; d]
-  f: key d;
-  m: f!ins[;<]@'hsym f;
-  m};
+.py.rt.prop.prj:{[qco; arg]
+  acc: $[arg~(::); [arg:`; `get]; `set];
 
-.py.priv.mapVars:{[ins; d]
-  k: key d;
-  h: hsym k;
-  v:{ g: x[y;];
-      s: x[:;y;];
-      d:`get`set!(g;s);
-      .py.priv.acor[d]}[ins;] each h;
-  m: (!/)($[1>=count k; .py.ut.enlist each;](k;v));
-  m};
+  if[.py.ut.isNull func:qco[acc];
+    'string[typ]," accessor not available"];
 
-.py.priv.acor:{[acor;arg]
-  typ:$[arg~(::);[arg:`;`get];`set];
-  if[.py.ut.isNull func:acor[typ];'string[typ]," accessor not available"];
-  func[arg]};
+  res:func[arg];
+
+  res}
+
+.py.rt.func.cxt:{[pin; info]
+  fns: key info;
+  cxt: fns!{[pin;fn]
+        prj:.py.qcall[pin;] fn;
+          prj}[pin] each fns;
+  cxt};
+
+.py.rt.func.prj:{[qco; arg]
+  arg: .py.ut.enlist $[.py.ut.isNull arg; (::); arg];
+  res: qco . arg;
+  res};
+
+.py.rt.vars.cxt:{[pin; info]
+  vkey: key info;
+  vpns: hsym vkey;
+  vmap: {[pin; vpn] 
+          gtf: pin[vpn;];
+            stf: pin[:;vpn;];
+              gsm: `get`set!(gtf;stf);
+                prj:.py.rt.prop.prj[gsm];
+                  prj}[pin;] each vpns;
+  cxt: (!/)($[1>=count vkey; .py.ut.enlist each;](vkey;vmap));
+  cxt};
+
+.pyp.idx: 0;
+
+.pyp.ref:([]module:`symbol$();class:`symbol$();ins:`symbol$();cxt:`symbol$());
+
+.pyp.point:{[r;v]
+  i: string "i"$.pyp.idx;
+  n: `$".pyp.",string[r],i;
+  n set v;
+  n};
+
+.pyp.makeRef:{[pin;pix]
+  module: `$ first "." vs pin[`:__module__;`];
+  class: `$ pin[`:__class__.__name__;`];
+  .pyp.ref,:(module; class; pin; pix);
+  .pyp.idx+:1;
+
+  last .pyp.ref};
