@@ -11,5 +11,4 @@ requirements:
     - pip
   run:
     - python
-    - embedpy
-    - kdb
+    - pip 

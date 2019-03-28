@@ -1,5 +1,7 @@
 #!/bin/bash
-pip install pyment
+#conda install -c kx embedPy
+
+pip install git+https://github.com/dadadel/pyment.git
 
 export QHOME=$PREFIX/q
 QLIBDIR=l64
