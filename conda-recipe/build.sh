@@ -1,4 +1,6 @@
 #!/bin/bash
+pip install pyment
+
 export QHOME=$PREFIX/q
 QLIBDIR=l64
 
