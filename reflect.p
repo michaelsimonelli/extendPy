@@ -1,5 +1,6 @@
 import io
 import pyment
+import builtins
 from enum import IntEnum
 from inspect import *
 from collections import namedtuple, OrderedDict
@@ -12,11 +13,7 @@ from collections import namedtuple, OrderedDict
 
 
 def get_info(obj):
-    if ismodule(obj):
-        return _module_info(obj)
-    if isclass(obj):
-        return _class_info(obj)
-    return {}
+    return _info(obj)
 
 
 #############################
@@ -27,26 +24,61 @@ def get_info(obj):
 Element = namedtuple('Element', 'name desc ptyp')
 
 
-class AttrType(IntEnum):
-    INIT = 0,
-    CLASS_VAR = 1,
+def get_attr(obj, predicate=None):
+    attr = []
+    members = getmembers(obj, predicate)
+    for m in members:
+        name = m[0]
+        obj = m[1]
+        typ = type(obj)
+        if not _is_pub(name):
+            continue
+        if isroutine(obj):
+            prof = 'function'
+        elif isclass(obj):
+            prof = 'class'
+        elif ismodule(obj):
+            prof = 'module'
+        elif _is_primitive(obj):
+            prof = 'data'
+        else:
+            prof = 'undef'
+        entry = dict(name=name, prof=prof, obj=obj)
+        attr.append(entry)
+    return attr
+
+
+class MemberGroup(IntEnum):
+    MODULE = 0,
+    CLASS = 1,
+    DATA = 2,
+    PROPERTY = 3,
+    FUNCTION = 4,
+    UNDEF = 5
+
+
+class AttributeType(IntEnum):
+    CLASS_VARIABLE = 0,
+    INIT = 1,
     PROPERTY = 2,
     INSTANCE_METHOD = 3,
     CLASS_METHOD = 4,
     STATIC_METHOD = 5,
-    MODULE_METHOD = 6,
-    MODULE_DATA = 7
+    BASE_METHOD = 6,
+    BUILTIN_METHOD = 7
 
 
 class Member:
-    def __init__(self, obj, name=None):
+    def __init__(self, obj, name=None, parent=None):
         self.obj = obj
         self.name = name
+        self.parent = parent
         if not self.name:
             self.name = _obj_name(obj)
         self.doc = _obj_doc(self.obj)
         self.typ = type(self.obj)
         self.mod = _obj_mod(self.obj)
+        self.grp = _obj_group(self.obj)
         try:
             self.cls = _obj_cls(self.obj)
         except AttributeError:
@@ -64,34 +96,68 @@ class Member:
         return qd
     
     def get_members(self, predicate=None):
-        return [Member(m[1], m[0]) for m in getmembers(self.obj, predicate)]
+        return [Member(m[1], m[0], self.grp) for m in getmembers(self.obj, predicate)]
+    
+    def get_modules(self):
+        return [m for m in self.get_members(ismodule) if _is_pub(c.name)]
+    
+    def get_classes(self):
+        return [c for c in self.get_members(isclass) if _is_pub(c.name)]
     
     def get_data(self):
-        data_info = [DataInfo(a) for a in classify_class_attrs(self.obj)
-                     if _is_pub(a.name) and a.kind is 'data']
-        return data_info
+        if self.grp == MemberGroup.CLASS:
+            data_info = [DataInfo(a) for a in classify_class_attrs(self.obj)
+                         if _is_pub(a.name) and a.kind is 'data']
+            return data_info
+        if self.grp == MemberGroup.MODULE:
+            data_info = []
+            members = self.get_members()
+            for m in members:
+                if not _is_pub(m.name):
+                    continue
+                if m.grp == MemberGroup.DATA:
+                    kind = 'data'
+                    base = _obj_cls(m.obj)
+                    info = DataInfo(Attribute(m.name, kind, base, m.obj))
+                    data_info.append(info)
+            return data_info
+        return None
     
     def get_methods(self):
-        method_info = [FuncInfo(a) for a in classify_class_attrs(self.obj)
-                       if _is_pub(a.name) and 'method' in a.kind]
-        return method_info
+        if self.grp == MemberGroup.CLASS:
+            method_info = [FuncInfo(a) for a in classify_class_attrs(self.obj)
+                           if _is_pub(a.name) and 'method' in a.kind]
+            return method_info
+        if self.grp == MemberGroup.MODULE:
+            method_info = []
+            members = self.get_members(isroutine)
+            for m in members:
+                if not _is_pub(m.name):
+                    continue
+                if m.grp == MemberGroup.FUNCTION:
+                    kind = 'builtin method' if isbuiltin(m.obj) else 'base method'
+                    info = FuncInfo(Attribute(m.name, kind, self.obj, m.obj))
+                    method_info.append(info)
+            return method_info
+        return None
     
     def get_properties(self):
-        property_info = [PropertyInfo(a) for a in classify_class_attrs(self.obj)
-                         if _is_pub(a.name) and a.kind is 'property']
-        return property_info
+        if self.grp == MemberGroup.CLASS:
+            property_info = [PropertyInfo(a) for a in classify_class_attrs(self.obj)
+                             if _is_pub(a.name) and a.kind is 'property']
+            return property_info
+        return None
 
 
 class AttrInfo(Member):
     _kind_map = {
-        'static method': AttrType.STATIC_METHOD,
-        'class method':  AttrType.CLASS_METHOD,
-        'property':      AttrType.PROPERTY,
-        'method':        AttrType.INSTANCE_METHOD,
-        'data':          AttrType.CLASS_VAR,
-        'mod func':      AttrType.MODULE_METHOD,
-        'mod data':      AttrType.MODULE_DATA
-        
+        'data':           AttributeType.CLASS_VARIABLE,
+        'property':       AttributeType.PROPERTY,
+        'method':         AttributeType.INSTANCE_METHOD,
+        'class method':   AttributeType.CLASS_METHOD,
+        'static method':  AttributeType.STATIC_METHOD,
+        'base method':    AttributeType.BASE_METHOD,
+        'builtin method': AttributeType.BUILTIN_METHOD
     }
     
     def __init__(self, attr: Attribute):
@@ -100,7 +166,7 @@ class AttrInfo(Member):
         self.attr_kind = attr.kind
         
         if attr.name is '__init__':
-            _attr_type = AttrType.INIT
+            _attr_type = AttributeType.INIT
         else:
             _attr_type = self._kind_map[attr.kind]
             if attr.name.startswith('_'):
@@ -216,37 +282,34 @@ def _module_info(module):
     mem = Member(module)
     classes = {}
     for cls in mem.get_members(isclass):
+        if cls.name.startswith('_'):
+            continue
         cls_info = _class_info(cls)
         classes.update({cls.name: cls_info})
     
-    base = [Member(m[1], m[0]) for m in getmembers(module) if _is_pub(m[0]) and not isclass(m[1])]
-    
-    if base:
-        data = {}
-        func = {}
-        attr = OrderedDict()
-        for b in base:
-            if isroutine(b.obj):
-                at = (Attribute(b.name, 'mod func', module, b.obj))
-                fi = FuncInfo(at)
-                func[b.name] = fi.cxt()
-            else:
-                at = (Attribute(b.name, 'mod data', module, b.obj))
-                di = DataInfo(at)
-                data[b.name] = di.cxt()
-        
-        n = 'base'
-        if n in classes.keys():
-            classes[n]['attributes']['data'].update(data)
-            classes[n]['attributes']['functions'].update(func)
-        else:
-            attr['data'] = data
-            attr['functions'] = func
-            base_attr = dict(attributes=attr)
-            classes.update({n: base_attr})
-    
     mod_info = dict(classes=classes)
     return mod_info
+
+
+def _info(obj):
+    if not isinstance(obj, Member):
+        obj = Member(obj)
+    attributes = OrderedDict()
+    clss = obj.get_classes()
+    data = obj.get_data()
+    prop = obj.get_properties()
+    func = obj.get_methods()
+    if clss:
+        attributes['classes'] = {x.name: _info(x) for x in clss}
+    if data:
+        attributes['data'] = {x.name: x.cxt() for x in data}
+    if prop:
+        attributes['properties'] = {x.name: x.cxt() for x in prop}
+    if func:
+        attributes['functions'] = {x.name: x.cxt() for x in func}
+    if obj.doc:
+        attributes['doc'] = obj.doc
+    return attributes
 
 
 def _class_info(obj):
@@ -255,43 +318,49 @@ def _class_info(obj):
     if not isclass(obj.typ):
         return
     attributes = OrderedDict()
-    attributes['data'] = {x.name: x.cxt() for x in obj.get_data()}
-    attributes['properties'] = {x.name: x.cxt() for x in obj.get_properties()}
-    attributes['functions'] = {x.name: x.cxt() for x in obj.get_methods()}
+    data = {x.name: x.cxt() for x in obj.get_data()}
+    prop = {x.name: x.cxt() for x in obj.get_properties()}
+    func = {x.name: x.cxt() for x in obj.get_methods()}
+    if data:
+        attributes['data'] = data
+    if prop:
+        attributes['prop'] = prop
+    if func:
+        attributes['func'] = func
     cls_attr = dict(attributes=attributes, doc=obj.doc)
     return cls_attr
 
 
-def _base_module_attrs(module):
-    """Classify public module attributes,
-    return as (name, category, value) tuples sorted by name."""
-    
-    if not ismodule(module):
-        raise TypeError("module must be of <class 'module'>")
-    
-    base = [Member(m[1], m[0]) for m in getmembers(module) if _is_pub(m[0]) and not isclass(m[1])]
-    
-    if base:
-        data = {}
-        func = {}
-        attr = OrderedDict()
-        
-        for b in base:
-            if isroutine(b.obj):
-                at = (Attribute(b.name, 'mod func', module, b.obj))
-                fi = FuncInfo(at)
-                func[b.name] = fi.cxt()
-            else:
-                at = (Attribute(b.name, 'mod data', module, b.obj))
-                di = DataInfo(at)
-                data[b.name] = di.cxt()
-        
-        if data:
-            attr['data'] = data
-        if func:
-            attr['functions'] = func
-    
-    return attr
+# def _base_module_attrs(module):
+#     """Classify public module attributes,
+#     return as (name, category, value) tuples sorted by name."""
+#
+#     if not ismodule(module):
+#         raise TypeError("module must be of <class 'module'>")
+#
+#     base = [Member(m[1], m[0]) for m in getmembers(module) if _is_pub(m[0]) and not isclass(m[1])]
+#
+#     if base:
+#         data = {}
+#         func = {}
+#         attr = OrderedDict()
+#
+#         for b in base:
+#             if isroutine(b.obj):
+#                 at = (Attribute(b.name, 'mod func', module, b.obj))
+#                 fi = FuncInfo(at)
+#                 func[b.name] = fi.cxt()
+#             else:
+#                 at = (Attribute(b.name, 'mod data', module, b.obj))
+#                 di = DataInfo(at)
+#                 data[b.name] = di.cxt()
+#
+#         if data:
+#             attr['data'] = data
+#         if func:
+#             attr['functions'] = func
+#
+#     return attr
 
 
 def _obj_doc(obj):
@@ -353,6 +422,26 @@ def _obj_qual(obj):
             return cls
 
 
+def _obj_group(obj):
+    if ismodule(obj):
+        return MemberGroup.MODULE
+    elif isclass(obj) or hasattr(obj, '__slots__'):
+        return MemberGroup.CLASS
+    elif isroutine(obj):
+        return MemberGroup.FUNCTION
+    elif _is_primitive(obj):
+        return MemberGroup.DATA
+    return MemberGroup.UNDEF
+
+
+def _cls_from_str(module_str, class_str):
+    # load the module, will raise ImportError if module cannot be loaded
+    m = __import__(module_str, globals(), locals(), class_str)
+    # get the class, will raise AttributeError if class cannot be found
+    c = getattr(m, class_str)
+    return c
+
+
 def _obj_out(obj):
     name = _obj_name(obj)
     return name, obj
@@ -369,6 +458,16 @@ def _is_prop(obj):
 
 def _is_pub(name):
     return not name.startswith('_') or name is '__init__'
+
+
+def _is_primitive(obj):
+    if hasattr(obj, '__slots__'):
+        return False
+    if hasattr(obj, '__class__'):
+        if hasattr(obj.__class__, '__module__'):
+            if not obj.__class__.__module__ == 'builtins':
+                return False
+    return not hasattr(obj, '__dict__')
 
 
 def _doc_meta(obj):
