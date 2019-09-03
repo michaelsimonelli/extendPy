@@ -41,7 +41,7 @@
 ///////////////////////////////////////
 
 // Stores imported python modules
-.py.imported: ()!();
+.py.modules: ()!();
 
 ///
 // Import a python module
@@ -50,9 +50,9 @@
 // module [symbol] - module name
 // as     [symbol] - alias to avoid clashes
 .py.import:{[module] 
-  if[module in key .py.imported;
+  if[module in key .py.modules;
     .py.lg"Module already imported"; :(::)];
-  if[@[{.py.imported[x]:.p.import x; 1b}; module; .py.err.import[module]];
+  if[@[{.py.modules[x]:.p.import x; 1b}; module; .py.err.import[module]];
       .py.lg"Imported module '",(module$:),"'"];
   };
 
@@ -78,9 +78,9 @@
 
   r: .py.reflection.dir[m; `classes];
 
-  if[not .ut.isNull c; r: .[r; (c; `attributes)]];
+  if[not .ut.isNull c; r: r[c]`functions];
 
-  if[not .ut.isNull f; r: .[r; (`functions; f)]];
+  if[not .ut.isNull f; r: r f];
 
   r};
 
@@ -99,7 +99,7 @@
   cxt: .ut.default[x 1; module];
 
   reflected: .[{[module; cxt]
-    .ut.assert[not .ut.isNull pyModule: .py.imported[module]; "Python module '",(module$:),"' must be imported first"];
+    .ut.assert[not .ut.isNull pyModule: .py.modules[module]; "Python module '",(module$:),"' must be imported first"];
     
     ref: .py.reflection.dir[module]: mi: .py.reflection.getInfo[pyModule];
 
@@ -137,7 +137,7 @@
   cxt: .ut.default[x 2; `.py];
 
   mapped: .[{[module; funcs; cxt]
-    .ut.assert[not .ut.isNull pyModule:.py.imported[module]; "Python module '",(module$:),"' must be imported first"];
+    .ut.assert[not .ut.isNull pyModule:.py.modules[module]; "Python module '",(module$:),"' must be imported first"];
   
     qCallable: .py.qcall[pyModule] funcs;
 
@@ -157,7 +157,7 @@
   0b};
 
 .py.reflection.priv.project:{[module; class]
-  obj: .py.imported[module] hsym class;
+  obj: .py.modules[module] hsym class;
   atr: .py.reflection.dir[module][`classes][class];
   pro: .py.reflection.priv.context[obj; atr];
   pro};
