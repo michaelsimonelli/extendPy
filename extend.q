@@ -159,16 +159,8 @@
 .py.reflection.priv.project:{[module; class]
   obj: .py.modules[module] hsym class;
   atr: .py.reflection.dir[module][`classes][class];
-  pro: .py.reflection.priv.context[obj; atr];
+  pro: .ut.xfunc {[x;y] x[y]}[.py.reflection.priv.context[obj; atr]];
   pro};
-
-/ .py.reflection.priv.project:{[imp; cls]
-/   p: .ut.eachKV[cls;{
-/       obj: x hsym y;
-/       atr: z`attributes;
-/       cxt: .py.reflection.priv.context[obj; atr];
-/       cxt}[imp]];
-/   p};
 
 .py.reflection.priv.context:{[obj; atr; arg]
   init: atr[`functions][`$"__init__"];
