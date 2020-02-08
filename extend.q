@@ -182,7 +182,7 @@
   cxt};
 
 .py.reflection.priv.args:{[args]
-  if[args~(::);:args];
+  if[any args~/:(::;enlist (::));:(::)];
   
   args: .ut.strSym[args];
 
