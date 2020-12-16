@@ -158,8 +158,9 @@
 
 .py.reflection.priv.project:{[module; class]
   obj: .py.modules[module] hsym class;
-  atr: .py.reflection.dir[module][`classes][class];
-  pro: .ut.xfunc {[x;y] x[y]}[.py.reflection.priv.context[obj; atr]];
+  ext: {[x;y]if[.ut.isTable y;y:raze y]; x[y]};
+  atr: .ut.blankNS,.py.reflection.dir[module][`classes][class];
+  pro: .ut.xfunc ext[.py.reflection.priv.context[obj; atr]];
   pro};
 
 .py.reflection.priv.context:{[obj; atr; arg]
