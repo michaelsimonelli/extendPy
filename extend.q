@@ -178,7 +178,7 @@
   atr[`vars]: .py.vars[ins];
   atr: @[atr;`functions;{x _ `$"__init__"}];
 
-  cxt: blk,(,/)value .ut.eachKV[`doc _ atr;{.py.reflection.priv[y;`cxt][x;z]}[ins]];
+  cxt: blk,(,/)value .ut.eachKV[``doc _ atr;{.py.reflection.priv[y;`cxt][x;z]}[ins]];
 
   cxt};
 
